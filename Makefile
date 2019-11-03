@@ -90,6 +90,24 @@ ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]nopie'),)
 CFLAGS += -fno-pie -nopie
 endif
 
+ifeq ($(SCHEDFLAG),FCFS)
+CFLAGS += -D FCFS
+endif
+ifeq ($(SCHEDFLAG),PBS)
+CFLAGS += -D PBS
+endif
+ifeq ($(SCHEDFLAG),MLFQ)
+CFLAGS += -D MLFQ
+endif
+ifeq ($(SCHEDFLAG),RR)
+CFLAGS += -D DEFAULT
+endif
+
+ifeq ($(LA),RA)
+CFLAGS += -D RA
+endif
+
+
 xv6.img: bootblock kernel
 	dd if=/dev/zero of=xv6.img count=10000
 	dd if=bootblock of=xv6.img conv=notrunc
@@ -182,6 +200,7 @@ UPROGS=\
 	_wc\
 	_helloworld\
 	_zombie\
+	_pss\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)
