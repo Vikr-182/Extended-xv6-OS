@@ -89,3 +89,16 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+int 
+sys_hello(void)
+{
+	int n;
+	if(argint(0,&n)<0)
+	{
+		cprintf("Please enter correct value\n");
+		return -1;
+	}
+	cprintf("Hello World %d\n",n);
+	return 0;
+}
