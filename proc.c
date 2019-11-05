@@ -12,9 +12,15 @@
 struct {
 	struct spinlock lock;
 	struct proc proc[NPROC];
-	struct pstat pstat_var[NPROC];
+//	struct pstat pstat_var[NPROC];
 } ptable;
 
+struct bets
+{
+    int a[5];
+};
+
+struct bets alpha;
 static struct proc *initproc;
 
 int nextpid = 1;
@@ -24,7 +30,8 @@ extern void trapret(void);
 static void wakeup1(void *chan);
 
 struct proc *mlfq[NPROC][5];
-int cnt[5];
+struct pstat pstat_var;
+int cnt[5]= {-1,-1,-1,-1,-1};
 
 int clock_time[5] = {1,2,4,8,16};
 
@@ -95,11 +102,14 @@ allocproc(void)
 
 found:
 	//	! MLFQ SCHEDULING CODE NON-CONFLICTING WITH ORIGINAL
-	mlfq[cnt[0]++][0] = p;
-
+	mlfq[++cnt[0]][0] = p;
+	reverse[p->pid] = cnt[0];
+    pstat_var.queue_num[p->pid] = 0;
+    cprintf("%dna\n",cnt[0]);
 	p->state = EMBRYO;
 	p->pid = nextpid++;
-	int actual = p->pid;
+/*
+    int actual = p->pid;
 	struct pstat *q ;
 	q = ptable.pstat_var;
 	for(int h=0;h<actual;h++)
@@ -115,12 +125,25 @@ found:
 	{
 		q->ticks[t] = 0;
 	}
+*/
 	p->priority = 10;		// Inital random value
 	p->ctime = ticks;		// Creation time
 	p->rtime = 0;			// Total time
 	p->etime = 0;			// End time is 0
 	p->iotime = 0;			// IO time is 0
 	p->clicks = 0;
+	pstat_var.inuse[p->pid] = 1;
+    pstat_var.priority[p->pid] = p->priority;
+    pstat_var.ticks[p->pid][0] = 0;
+    pstat_var.ticks[p->pid][1] = 0;
+    pstat_var.ticks[p->pid][2] = 0;
+    pstat_var.ticks[p->pid][3] = 0;
+    pstat_var.pid[p->pid] = p->pid;
+
+    for(int i=0;i<5;i++)
+    {
+         pstat_var.ticks[p->pid][i] = 0;
+    }
 	release(&ptable.lock);
 
 	// Allocate kernel stack.
@@ -344,6 +367,52 @@ wait(void)
 	}
 }
 
+int wait2(int *retime, int *rutime, int *stime) {
+  struct proc *p;
+  int havekids, pid;
+  acquire(&ptable.lock);
+  for(;;){
+    // Scan through table looking for zombie children.
+    havekids = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->parent != myproc())
+        continue;
+      havekids = 1;
+      if(p->state == ZOMBIE){
+        // Found one.
+        *retime = p->retime;
+        *rutime = p->rutime;
+        *stime = p->stime;
+        pid = p->pid;
+        kfree(p->kstack);
+        p->kstack = 0;
+        freevm(p->pgdir);
+        p->state = UNUSED;
+        p->pid = 0;
+        p->parent = 0;
+        p->name[0] = 0;
+        p->killed = 0;
+        p->ctime = 0;
+        p->retime = 0;
+        p->rutime = 0;
+        p->stime = 0;
+        p->priority = 0;
+        release(&ptable.lock);
+        return pid;
+      }
+    }
+
+    // No point waiting if we don't have any children.
+    if(!havekids || myproc()->killed){
+      release(&ptable.lock);
+      return -1;
+    }
+
+    // Wait for children to exit.  (See wakeup1 call in proc_exit.)
+    sleep(myproc(), &ptable.lock);  //DOC: wait-sleep
+  }
+}
+
 	int 
 waitx(int *wtime,int *rtime )
 {
@@ -388,6 +457,54 @@ waitx(int *wtime,int *rtime )
 	}
 }
 
+void update_table()
+{
+	acquire(&ptable.lock);
+    struct proc *u = 0;
+    for(u=ptable.proc;u<&ptable.proc[NPROC];u++)
+    {
+        if(u->state == RUNNING)
+        {
+            int ind = reverse[u->pid];              // index where it is present in it's queue.
+            int qu = pstat_var.queue_num[u->pid];   // current queue number of the process.
+            pstat_var.runtime[u->pid]++;            // increase runtime
+            
+            if(pstat_var.runtime[u->pid] == clock_time[qu]) // if it exceeds the quantum , demote it 
+            {
+                if(qu != 4)
+                {
+                    cnt[qu+1]++;
+                    mlfq[cnt[qu+1]][qu+1] = u;      // kept it down
+                    reverse[u->pid] = cnt[qu+1];    // to store where it went
+                    for(int g=ind;g<cnt[qu];qu++)    
+                    {
+                        mlfq[g][qu] = mlfq[g+1][qu];// shift left all processes
+                        if(mlfq[g][qu])
+                        {
+                            reverse[mlfq[g][qu]->pid] = g;
+                        }
+                    }
+                    mlfq[cnt[qu]][qu] = 0;
+                    cnt[qu]--;
+                    pstat_var.queue_num[u->pid] = qu+1;// update queue number after sending it down.
+                }
+            }
+            continue;
+        }
+    }
+    release(&ptable.lock);
+}
+
+void display()
+{
+    for(int g=0;g<5;g++)
+    {
+        cprintf(",%d,| %d|\t",g,cnt[g]);
+        for(int b=0;b<cnt[g];b++){cprintf("|%d|",mlfq[b][g]->pid);}
+    }
+    cprintf("\n\n");
+}
+
 
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
@@ -413,83 +530,62 @@ scheduler(void)
 		// Loop over process table looking for process to run.
 		acquire(&ptable.lock);
 
-
+#ifdef MLFQ
 		//	!	ADDED MLFQ 	///////////////////////////////////////////////////////////////////
-
-		/*
-		   for(int f=0;f<5;f++)
-		   {
-		   if(cnt[f]!=-1)
-		   {
-		   int v;
-		   struct pstat *q;
-		   q = ptable.pstat_var;
-		   for(v=0;v<=cnt[f];v++)
-		   {
-		   if(mlfq[v][f]->state != RUNNABLE)
-		   {
-		   continue;
-		   }
-		   p = mlfq[v][f];
-		   proc = mlfq[v][f];
-		   c->proc = p;
-		   p->clicks++;
-		   switchuvm(p);
-		   p->state = RUNNING;
-		   swtch(&(c->scheduler), p->context);
-		   switchkvm();
-
-
-
-
-
-		// Process is done running for now.
-		// It should have changed its p->state before coming back.
-		c->proc = 0;
-
-		q->ticks[f] = p->clicks;
-		if(p->clicks == clock_time[f])
+        struct proc *mP = 0;
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
 		{
-		// copy to lower priority queue
-		if(f != 4)
-		{
-		cnt[f+1]++;
-		proc->priority = proc->priority + 1;
-		mlfq[cnt[f+1]][f+1] = proc;					
-		}
-		// push one down
-		mlfq[v][f] = NULL;
-		for(int z=v;z<=cnt[f]-1;z++)
-		{
-		mlfq[z][f] = mlfq[z][f+1];
-		}
-		mlfq[cnt[f]][f] = NULL;
-		proc->clicks = 0;
-		cnt[f]--;
-		}
-		q++;
-		c->proc = 0;
-		}
-		}
-		}
+			if(p->state != RUNNABLE)
+				continue;
+            if(mP == 0)
+            {
+                mP = p;
+            }
+            else
+            {
+                int qp = pstat_var.queue_num[p->pid];
+                int qm = pstat_var.queue_num[mP->pid];
+                
+                if(qp < qm || (qp==qm && p->ctime < mP->ctime))
+                {
+                    mP = p;
+                }
+            }
+            // execute the selected process increase the ticks of all that in waiting queue this will happen in trap.c
+            if(mP !=0 && mP->state==RUNNABLE)
+			{
+				p = mP;
+			}
+//            cprintf("Sel %d %d\n",mP->pid,pstat_var.queue_num[mP->pid]);
+			//	!	REMAINING CODE ////////////////////////////////////////////////////////////////////
+			if(p != 0)
+			{
+				// Switch to chosen process.  It is the process's job
+				// to release ptable.lock and then reacquire it
+				// before jumping back to us.
+				c->proc = p;
+				switchuvm(p);
+				p->state = RUNNING;
+				//cprintf("This babe started running %d\n",p->pid);
 
+				swtch(&(c->scheduler), p->context);
+				switchkvm();
 
-*/
-
-
+				// Process is done running for now.
+				// It should have changed its p->state before coming back.
+				c->proc = 0;
+			}
+        }
+#endif
+#ifdef FCFS
+        // ! FCFS           //////////////////////////////////////////////////////////////////	
 		struct proc *minP = 0;
-		struct pstat *hima = ptable.pstat_var;
-		hima = ptable.pstat_var;
 		for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
 		{
 			if(p->state != RUNNABLE)
 				continue;
 
-			//	!	ADDED FCFS	///////////////////////////////////////////////////////////////////
-
-			if(p->state != RUNNABLE)
-				continue;
-			if(p->pid > 1)
+            if(p->pid > 1)
 			{
 				if(minP!=0)
 				{
@@ -497,7 +593,7 @@ scheduler(void)
 					{
 						minP = p;
 					}	
-				else
+                    else
 					{
 						// do nothing
 					}
@@ -511,8 +607,6 @@ scheduler(void)
 			{
 				p = minP;
 			}
-
-
 
 			//	!	REMAINING CODE ////////////////////////////////////////////////////////////////////
 			if(p != 0)
@@ -532,12 +626,8 @@ scheduler(void)
 				// It should have changed its p->state before coming back.
 				c->proc = 0;
 			}
-			hima++;
 		}
-
-
-
-
+#endif
 		release(&ptable.lock);
 	}
 }
@@ -723,6 +813,7 @@ procdump(void)
 	int
 getpinfo(struct pstat *st,int pid)
 {
+    /*
 	struct proc *p;
 	acquire(&ptable.lock);
 	struct pstat *ip;
@@ -751,5 +842,7 @@ getpinfo(struct pstat *st,int pid)
 	}
 	release(&ptable.lock);
 	if(!flag) return -1;
-	return 0;
+	
+    */
+    return 0;
 }

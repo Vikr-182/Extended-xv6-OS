@@ -70,6 +70,8 @@ struct proc {
 	int clicks;			// Total ticks spent
 };
 
+void update_table();
+int reverse[300000];
 // Process memory is laid out contiguously, low addresses first:
 //   text
 //   original data and bss
