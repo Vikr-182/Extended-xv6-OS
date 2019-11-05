@@ -111,12 +111,20 @@ sys_hello(void)
 	int 
 sys_getpinfo(void)
 {
-	cprintf("Sr.No\tPID\tRunTime\tCurrentQueue\tQ1 Ticks\tQ2 Ticks\tQ3 Ticks\tQ4 Ticks\tQ5 Ticks\n");
-	for(int g=0;g<64;g++)
+	//struct pstat *g = 0;
+	struct pstat *st ;
+	int num;
+	if(argptr(0,(char **)&st,sizeof(struct pstat ))<0)
 	{
-		struct pstat *st;
-		getpinfo(&st,n);
-		cprintf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",h,i->pid,i->runtime,i->current_queue,i->ticks[0],i->ticks[1],i->ticks[2],i->ticks[3],i->ticks[4]);
+		cprintf("Yr kya hya\n");
+		return -1;
 	}
+	if(argint(1,&num)<0)
+	{
+		cprintf("La La\n");
+		return -1;
+	}
+	int a = getpinfo(st,num);
+	a++;
 	return 0;
 }

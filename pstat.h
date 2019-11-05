@@ -1,4 +1,5 @@
-
+#ifndef _PSTAT_H_
+#define _PSTAT_H_
 #include "param.h"
 struct pstat
 {
@@ -8,3 +9,4 @@ struct pstat
 	int current_queue;
 	int ticks[5];
 };
+#endif

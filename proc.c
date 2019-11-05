@@ -415,68 +415,73 @@ scheduler(void)
 
 
 		//	!	ADDED MLFQ 	///////////////////////////////////////////////////////////////////
-/*
-		for(int f=0;f<5;f++)
+
+		/*
+		   for(int f=0;f<5;f++)
+		   {
+		   if(cnt[f]!=-1)
+		   {
+		   int v;
+		   struct pstat *q;
+		   q = ptable.pstat_var;
+		   for(v=0;v<=cnt[f];v++)
+		   {
+		   if(mlfq[v][f]->state != RUNNABLE)
+		   {
+		   continue;
+		   }
+		   p = mlfq[v][f];
+		   proc = mlfq[v][f];
+		   c->proc = p;
+		   p->clicks++;
+		   switchuvm(p);
+		   p->state = RUNNING;
+		   swtch(&(c->scheduler), p->context);
+		   switchkvm();
+
+
+
+
+
+		// Process is done running for now.
+		// It should have changed its p->state before coming back.
+		c->proc = 0;
+
+		q->ticks[f] = p->clicks;
+		if(p->clicks == clock_time[f])
 		{
-			if(cnt[f]!=-1)
-			{
-				int v;
-				struct pstat *q;
-				q = ptable.pstat_var;
-				for(v=0;v<=cnt[f];v++)
-				{
-					if(mlfq[v][f]->state != RUNNABLE)
-					{
-						continue;
-					}
-					p = mlfq[v][f];
-					proc = mlfq[v][f];
-					c->proc = p;
-					p->clicks++;
-					switchuvm(p);
-					p->state = RUNNING;
-					swtch(&(c->scheduler), p->context);
-					switchkvm();
-
-
-
-
-
-					// Process is done running for now.
-					// It should have changed its p->state before coming back.
-					c->proc = 0;
-
-					q->ticks[f] = p->clicks;
-					if(p->clicks == clock_time[f])
-					{
-						// copy to lower priority queue
-						if(f != 4)
-						{
-							cnt[f+1]++;
-							proc->priority = proc->priority + 1;
-							mlfq[cnt[f+1]][f+1] = proc;					
-						}
-						// push one down
-						mlfq[v][f] = NULL;
-						for(int z=v;z<=cnt[f]-1;z++)
-						{
-							mlfq[z][f] = mlfq[z][f+1];
-						}
-						mlfq[cnt[f]][f] = NULL;
-						proc->clicks = 0;
-						cnt[f]--;
-					}
-					q++;
-					c->proc = 0;
-				}
-			}
+		// copy to lower priority queue
+		if(f != 4)
+		{
+		cnt[f+1]++;
+		proc->priority = proc->priority + 1;
+		mlfq[cnt[f+1]][f+1] = proc;					
 		}
+		// push one down
+		mlfq[v][f] = NULL;
+		for(int z=v;z<=cnt[f]-1;z++)
+		{
+		mlfq[z][f] = mlfq[z][f+1];
+		}
+		mlfq[cnt[f]][f] = NULL;
+		proc->clicks = 0;
+		cnt[f]--;
+		}
+		q++;
+		c->proc = 0;
+		}
+		}
+		}
+
+
 */
+
 
 		struct proc *minP = 0;
 		struct pstat *hima = ptable.pstat_var;
-	        hima = ptable.pstat_var;
-		for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+		hima = ptable.pstat_var;
+		for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+		{
 			if(p->state != RUNNABLE)
 				continue;
 
@@ -492,7 +497,7 @@ scheduler(void)
 					{
 						minP = p;
 					}	
-					else
+				else
 					{
 						// do nothing
 					}
@@ -510,7 +515,6 @@ scheduler(void)
 
 
 			//	!	REMAINING CODE ////////////////////////////////////////////////////////////////////
-
 			if(p != 0)
 			{
 				// Switch to chosen process.  It is the process's job
@@ -519,6 +523,7 @@ scheduler(void)
 				c->proc = p;
 				switchuvm(p);
 				p->state = RUNNING;
+				//cprintf("This babe started running %d\n",p->pid);
 
 				swtch(&(c->scheduler), p->context);
 				switchkvm();
@@ -529,6 +534,9 @@ scheduler(void)
 			}
 			hima++;
 		}
+
+
+
 
 		release(&ptable.lock);
 	}
@@ -712,17 +720,25 @@ procdump(void)
 	}
 }
 
-int
+	int
 getpinfo(struct pstat *st,int pid)
 {
 	struct proc *p;
 	acquire(&ptable.lock);
 	struct pstat *ip;
 	ip = ptable.pstat_var;
+	int flag = 0;
+	int g = 0;
 	for(p=ptable.proc;p< &ptable.proc[NPROC];p++)
 	{
-		if(p->state == UNUSED || p->pid != pid )
+		if(p->state == UNUSED || g != pid )
+		{
+			ip++;
+			g++;
 			continue;
+		}
+		cprintf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",pid,ip->pid,ip->runtime,ip->current_queue,ip->ticks[0],ip->ticks[1],ip->ticks[2],ip->ticks[3],ip->ticks[4]);
+		flag = 1;
 		st->pid = ip->pid;
 		st->runtime = ticks-p->ctime;
 		st->num_run = p->clicks;
@@ -731,6 +747,9 @@ getpinfo(struct pstat *st,int pid)
 			st->ticks[h] = ip->ticks[h];
 		}
 		ip++;
+		g++;
 	}
+	release(&ptable.lock);
+	if(!flag) return -1;
 	return 0;
 }
