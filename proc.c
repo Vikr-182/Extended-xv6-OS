@@ -319,6 +319,7 @@ exit(void)
 
 	// Jump into the scheduler, never to return.
 	curproc->state = ZOMBIE;
+    curproc->etime = ticks;
 	sched();
 	panic("zombie exit");
 }
@@ -367,52 +368,6 @@ wait(void)
 	}
 }
 
-int wait2(int *retime, int *rutime, int *stime) {
-  struct proc *p;
-  int havekids, pid;
-  acquire(&ptable.lock);
-  for(;;){
-    // Scan through table looking for zombie children.
-    havekids = 0;
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->parent != myproc())
-        continue;
-      havekids = 1;
-      if(p->state == ZOMBIE){
-        // Found one.
-        *retime = p->retime;
-        *rutime = p->rutime;
-        *stime = p->stime;
-        pid = p->pid;
-        kfree(p->kstack);
-        p->kstack = 0;
-        freevm(p->pgdir);
-        p->state = UNUSED;
-        p->pid = 0;
-        p->parent = 0;
-        p->name[0] = 0;
-        p->killed = 0;
-        p->ctime = 0;
-        p->retime = 0;
-        p->rutime = 0;
-        p->stime = 0;
-        p->priority = 0;
-        release(&ptable.lock);
-        return pid;
-      }
-    }
-
-    // No point waiting if we don't have any children.
-    if(!havekids || myproc()->killed){
-      release(&ptable.lock);
-      return -1;
-    }
-
-    // Wait for children to exit.  (See wakeup1 call in proc_exit.)
-    sleep(myproc(), &ptable.lock);  //DOC: wait-sleep
-  }
-}
-
 	int 
 waitx(int *wtime,int *rtime )
 {
@@ -428,7 +383,8 @@ waitx(int *wtime,int *rtime )
 			if(p->parent != curproc)
 				continue;
 			havekids = 1;
-			if(p->state == ZOMBIE){
+			if(p->state == ZOMBIE)
+            {
 				// Found one.
 				*wtime= p->etime - p->ctime - p->rtime - p->iotime;
 				*rtime=p->rtime;
@@ -459,14 +415,17 @@ waitx(int *wtime,int *rtime )
 
 void update_table()
 {
+#ifdef MLFQ
 	acquire(&ptable.lock);
     struct proc *u = 0;
     for(u=ptable.proc;u<&ptable.proc[NPROC];u++)
     {
         if(u->state == RUNNING)
         {
+            u->rtime++;
             int ind = reverse[u->pid];              // index where it is present in it's queue.
             int qu = pstat_var.queue_num[u->pid];   // current queue number of the process.
+            u->rtime++;                             // increase running time
             pstat_var.runtime[u->pid]++;            // increase runtime
             
             if(pstat_var.runtime[u->pid] == clock_time[qu]) // if it exceeds the quantum , demote it 
@@ -491,8 +450,77 @@ void update_table()
             }
             continue;
         }
+        else if(u->state == SLEEPING )
+        {
+            u->iotime++;
+            continue;
+        }
     }
     release(&ptable.lock);
+#endif
+#ifdef RR
+    acquire(&ptable.lock);
+    struct proc *p;
+    for(p = ptable.proc; p < &ptable.proc[NROC] ; p++)
+    {
+        if(p->state == RUNNING)
+        {
+            p->rtime++;
+        }
+        else if(p->state == SLEEPING)
+        {
+            p->iotime++;
+        }
+    }
+    release(&ptable.lock);
+#endif
+#ifdef FCFS
+    acquire(&ptable.lock);
+    struct proc *p; 
+    for(p = ptable.proc; p < &ptable.proc[NROC] ; p++)
+    {   
+        if(p->state == RUNNING)
+        {
+            p->rtime++;
+        }
+        else if(p->state == SLEEPING)
+        {
+            p->iotime++;
+        }
+    }   
+    release(&ptable.lock);
+#endif
+#ifdef PBS 
+    acquire(&ptable.lock);
+    struct proc *p ;
+    struct proc *minP = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+    {
+        if(p->state == SLEEPING)
+        {
+            p->iotime++;
+            continue;
+        }
+        else if(p->state == RUNNING)
+        {
+            p->rtime++;
+            // choose the next higher priority process
+            for(p = ptable.proc; p < ptable.proc[NPROC]; p++)
+            {
+                if(minP == 0 || p->priority < minP->priority)
+                {
+                    if(p->pid > 1)
+                    {
+                        minP = p;
+                    }
+                }
+            }
+            continue;
+        }
+        
+    }
+    release(&ptable.lock);
+#endif
 }
 
 void display()
@@ -514,29 +542,55 @@ void display()
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
-	void
+    void
 scheduler(void)
 {
-	struct proc *p;
-	struct cpu *c = mycpu();
-	c->proc = 0;
-	//int last_scheduled = -1;
+    struct proc *p;
+    struct cpu *c = mycpu();
+    c->proc = 0;
+    //int last_scheduled = -1;
+    for(;;)
+    {
+        // Enable interrupts on this processor.
+        sti();
 
-	for(;;)
-	{
-		// Enable interrupts on this processor.
-		sti();
+        // Loop over process table looking for process to run.
+        acquire(&ptable.lock);
+#ifdef RR
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+        {
+            if(p->state != RUNNABLE)
+                continue;
+            if(p != 0)
+            {
+                // Switch to chosen process.  It is the process's job
+                // to release ptable.lock and then reacquire it
+                // before jumping back to us.
+                c->proc = p;
+                switchuvm(p);
+                p->state = RUNNING;
+                pstat_var.num_run[p->pid]++;
+                //cprintf("This babe started running %d\n",p->pid);
 
-		// Loop over process table looking for process to run.
-		acquire(&ptable.lock);
+                swtch(&(c->scheduler), p->context);
+                switchkvm();
+
+                // Process is done running for now.
+                // It should have changed its p->state before coming back.
+                c->proc = 0;
+            }
+
+
+        }
+#endif
 
 #ifdef MLFQ
-		//	!	ADDED MLFQ 	///////////////////////////////////////////////////////////////////
+        //	!	ADDED MLFQ 	///////////////////////////////////////////////////////////////////
         struct proc *mP = 0;
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-		{
-			if(p->state != RUNNABLE)
-				continue;
+        {
+            if(p->state != RUNNABLE)
+                continue;
             if(mP == 0)
             {
                 mP = p;
@@ -545,7 +599,7 @@ scheduler(void)
             {
                 int qp = pstat_var.queue_num[p->pid];
                 int qm = pstat_var.queue_num[mP->pid];
-                
+
                 if(qp < qm || (qp==qm && p->ctime < mP->ctime))
                 {
                     mP = p;
@@ -566,6 +620,7 @@ scheduler(void)
 				c->proc = p;
 				switchuvm(p);
 				p->state = RUNNING;
+                pstat_var.num_run[p->pid]++;
 				//cprintf("This babe started running %d\n",p->pid);
 
 				swtch(&(c->scheduler), p->context);
@@ -575,6 +630,44 @@ scheduler(void)
 				// It should have changed its p->state before coming back.
 				c->proc = 0;
 			}
+        }
+#endif
+#ifdef PBS
+        struct proc* highP = 0;
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+        {
+            if(p->state != RUNNABLE)
+            {
+                continue;
+            }
+            struct proc *p1 = 0;
+            for(p1 = ptable.proc; p1 < &ptable.proc[NPROC]; p1++)
+            {
+                if(   highP == 0 || ( (p1->state == RUNNABLE) && highP -> priority > p1->priority ) )    
+                {
+                    highP = p1;
+                }    
+            }
+            p = highP;
+            if(p != 0)
+            {
+                // Switch to chosen process.  It is the process's job
+				// to release ptable.lock and then reacquire it
+				// before jumping back to us.
+				c->proc = p;
+				switchuvm(p);
+				p->state = RUNNING;
+				pstat_var.num_run[p->pid]++;
+				//cprintf("This babe started running %d\n",p->pid);
+
+				swtch(&(c->scheduler), p->context);
+				switchkvm();
+
+				// Process is done running for now.
+				// It should have changed its p->state before coming back.
+				c->proc = 0;
+            
+            }
         }
 #endif
 #ifdef FCFS
@@ -617,6 +710,7 @@ scheduler(void)
 				c->proc = p;
 				switchuvm(p);
 				p->state = RUNNING;
+                pstat_var.num_run[p->pid]++;
 				//cprintf("This babe started running %d\n",p->pid);
 
 				swtch(&(c->scheduler), p->context);

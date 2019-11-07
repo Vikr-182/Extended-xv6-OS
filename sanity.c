@@ -6,6 +6,7 @@
 int
 main(int argc, char *argv[])
 {
+/*
 	if (argc != 2){
 				printf(1, "Usage: sanity [n]\n");
 				exit();
@@ -80,5 +81,10 @@ main(int argc, char *argv[])
 	printf(1, "\n\nCPU bound:\nAverage ready time: %d\nAverage running time: %d\nAverage sleeping time: %d\nAverage turnaround time: %d\n\n\n", sums[0][0], sums[0][1], sums[0][2], sums[0][0] + sums[0][1] + sums[0][2]);
 	printf(1, "CPU-S bound:\nAverage ready time: %d\nAverage running time: %d\nAverage sleeping time: %d\nAverage turnaround time: %d\n\n\n", sums[1][0], sums[1][1], sums[1][2], sums[1][0] + sums[1][1] + sums[1][2]);
 	printf(1, "I/O bound:\nAverage ready time: %d\nAverage running time: %d\nAverage sleeping time: %d\nAverage turnaround time: %d\n\n\n", sums[2][0], sums[2][1], sums[2][2], sums[2][0] + sums[2][1] + sums[2][2]);
+
+    */
+    printf(1,"Anna how are oyu Ra >\n");
 	exit();
+
+
 }

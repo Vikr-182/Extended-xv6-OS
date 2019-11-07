@@ -36,7 +36,8 @@ idtinit(void)
 void
 trap(struct trapframe *tf)
 {
-  if(tf->trapno == T_SYSCALL){
+  if(tf->trapno == T_SYSCALL)
+  {
     if(myproc()->killed)
       exit();
     myproc()->tf = tf;
@@ -53,7 +54,7 @@ trap(struct trapframe *tf)
       ticks++;
       wakeup(&ticks);
       release(&tickslock);
-      update_table();
+      update_queue();
     }
     lapiceoi();
     break;
