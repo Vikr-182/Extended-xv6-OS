@@ -128,3 +128,17 @@ sys_getpinfo(void)
 	a++;
 	return 0;
 }
+
+int sys_waitx(void)
+{
+    int *wtime;
+    int *rtime;
+
+    if(argptr(0, (char**)&wtime, sizeof(int)) < 0)
+        return -1;
+
+    if(argptr(1, (char**)&rtime, sizeof(int)) < 0)
+        return -1;
+
+    return waitx(wtime, rtime);
+}

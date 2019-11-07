@@ -461,7 +461,7 @@ void update_table()
 #ifdef RR
     acquire(&ptable.lock);
     struct proc *p;
-    for(p = ptable.proc; p < &ptable.proc[NROC] ; p++)
+    for(p = ptable.proc; p < &ptable.proc[NPROC] ; p++)
     {
         if(p->state == RUNNING)
         {

@@ -54,7 +54,7 @@ trap(struct trapframe *tf)
       ticks++;
       wakeup(&ticks);
       release(&tickslock);
-      update_queue();
+      update_table();
     }
     lapiceoi();
     break;
