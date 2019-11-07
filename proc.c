@@ -9,9 +9,10 @@
 #include "spinlock.h"
 #include "pstat.h"
 
+int rp = 0;
 struct {
 	struct spinlock lock;
-	struct proc proc[NPROC];
+	struct proc proc[NPROC*NPROC];
 //	struct pstat pstat_var[NPROC];
 } ptable;
 
@@ -29,7 +30,7 @@ extern void trapret(void);
 
 static void wakeup1(void *chan);
 
-struct proc *mlfq[NPROC][5];
+struct proc *mlfq[NPROC*NPROC][5];
 struct pstat pstat_var;
 int cnt[5]= {-1,-1,-1,-1,-1};
 
@@ -102,42 +103,24 @@ allocproc(void)
 
 found:
 	//	! MLFQ SCHEDULING CODE NON-CONFLICTING WITH ORIGINAL
-	mlfq[++cnt[0]][0] = p;
-	reverse[p->pid] = cnt[0];
-    pstat_var.queue_num[p->pid] = 0;
-    cprintf("%dna\n",cnt[0]);
 	p->state = EMBRYO;
 	p->pid = nextpid++;
-/*
-    int actual = p->pid;
-	struct pstat *q ;
-	q = ptable.pstat_var;
-	for(int h=0;h<actual;h++)
-	{
-		q++;
-	}
-
-	q->pid = p->pid;
-	q->runtime = 0;
-	q->num_run = 1;
-	q->current_queue = 0;
-	for(int t=0;t<5;t++)
-	{
-		q->ticks[t] = 0;
-	}
-*/
+    if(p->pid > 1)// insert into queue only if not 0 or 1 process
+    {
+        mlfq[++cnt[0]][0] = p;
+        reverse[p->pid] = cnt[0];
+    }
+    cprintf("%dna\n",cnt[0]);
 	p->priority = 10;		// Inital random value
 	p->ctime = ticks;		// Creation time
 	p->rtime = 0;			// Total time
 	p->etime = 0;			// End time is 0
 	p->iotime = 0;			// IO time is 0
 	p->clicks = 0;
+    pstat_var.queue_num[p->pid] = 0;
 	pstat_var.inuse[p->pid] = 1;
     pstat_var.priority[p->pid] = p->priority;
-    pstat_var.ticks[p->pid][0] = 0;
-    pstat_var.ticks[p->pid][1] = 0;
-    pstat_var.ticks[p->pid][2] = 0;
-    pstat_var.ticks[p->pid][3] = 0;
+    cprintf("Making %d %d\n",p->pid,rp);
     pstat_var.pid[p->pid] = p->pid;
 
     for(int i=0;i<5;i++)
@@ -180,97 +163,111 @@ userinit(void)
 
 	p = allocproc();
 
-	initproc = p;
-	if((p->pgdir = setupkvm()) == 0)
-		panic("userinit: out of memory?");
-	inituvm(p->pgdir, _binary_initcode_start, (int)_binary_initcode_size);
-	p->sz = PGSIZE;
-	memset(p->tf, 0, sizeof(*p->tf));
-	p->tf->cs = (SEG_UCODE << 3) | DPL_USER;
-	p->tf->ds = (SEG_UDATA << 3) | DPL_USER;
-	p->tf->es = p->tf->ds;
-	p->tf->ss = p->tf->ds;
-	p->tf->eflags = FL_IF;
-	p->tf->esp = PGSIZE;
-	p->ctime = ticks;
-	p->tf->eip = 0;  // beginning of initcode.S
+    for(int g=0;g<NPROC;g++)
+    {
+        pstat_var.pid[g] = -1;
+        pstat_var.inuse[g] = -1;
+        pstat_var.priority[g] = -1;
+        pstat_var.runtime[g] = -1;
+        pstat_var.num_run[g] = -1;
+        pstat_var.queue_num[g] = -1;
+        for(int b=0;b<5;b++)
+        {
+            pstat_var.ticks[g][b] = -1;
+        }
+    }
+    initproc = p;
+    if((p->pgdir = setupkvm()) == 0)
+        panic("userinit: out of memory?");
+    inituvm(p->pgdir, _binary_initcode_start, (int)_binary_initcode_size);
+    p->sz = PGSIZE;
+    memset(p->tf, 0, sizeof(*p->tf));
+    p->tf->cs = (SEG_UCODE << 3) | DPL_USER;
+    p->tf->ds = (SEG_UDATA << 3) | DPL_USER;
+    p->tf->es = p->tf->ds;
+    p->tf->ss = p->tf->ds;
+    p->tf->eflags = FL_IF;
+    p->tf->esp = PGSIZE;
+    p->ctime = ticks;
+    p->tf->eip = 0;  // beginning of initcode.S
 
-	safestrcpy(p->name, "initcode", sizeof(p->name));
-	p->cwd = namei("/");
+    safestrcpy(p->name, "initcode", sizeof(p->name));
+    p->cwd = namei("/");
 
-	// this assignment to p->state lets other cores
-	// run this process. the acquire forces the above
-	// writes to be visible, and the lock is also needed
-	// because the assignment might not be atomic.
-	acquire(&ptable.lock);
+    // this assignment to p->state lets other cores
+    // run this process. the acquire forces the above
+    // writes to be visible, and the lock is also needed
+    // because the assignment might not be atomic.
+    acquire(&ptable.lock);
 
-	p->state = RUNNABLE;
+    p->state = RUNNABLE;
 
-	release(&ptable.lock);
+    release(&ptable.lock);
 }
 
 // Grow current process's memory by n bytes.
 // Return 0 on success, -1 on failure.
-	int
+    int
 growproc(int n)
 {
-	uint sz;
-	struct proc *curproc = myproc();
+    uint sz;
+    struct proc *curproc = myproc();
 
-	sz = curproc->sz;
-	if(n > 0){
-		if((sz = allocuvm(curproc->pgdir, sz, sz + n)) == 0)
-			return -1;
-	} else if(n < 0){
-		if((sz = deallocuvm(curproc->pgdir, sz, sz + n)) == 0)
-			return -1;
-	}
-	curproc->sz = sz;
-	switchuvm(curproc);
-	return 0;
+    sz = curproc->sz;
+    if(n > 0){
+        if((sz = allocuvm(curproc->pgdir, sz, sz + n)) == 0)
+            return -1;
+    } else if(n < 0){
+        if((sz = deallocuvm(curproc->pgdir, sz, sz + n)) == 0)
+            return -1;
+    }
+    curproc->sz = sz;
+    switchuvm(curproc);
+    return 0;
 }
 
 // Create a new process copying p as the parent.
 // Sets up stack to return as if from system call.
 // Caller must set state of returned proc to RUNNABLE.
-	int
+    int
 fork(void)
 {
-	int i, pid;
-	struct proc *np;
-	struct proc *curproc = myproc();
+    int i, pid;
+    struct proc *np;
+    struct proc *curproc = myproc();
 
-	// Allocate process.
-	if((np = allocproc()) == 0){
-		return -1;
-	}
+    // Allocate process.
+    if((np = allocproc()) == 0){
+        return -1;
+    }
 
-	// Copy process state from proc.
-	if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
-		kfree(np->kstack);
-		np->kstack = 0;
-		np->state = UNUSED;
-		return -1;
-	}
-	np->sz = curproc->sz;
-	np->parent = curproc;
-	*np->tf = *curproc->tf;
+    // Copy process state from proc.
+    if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0)
+    {
+        kfree(np->kstack);
+        np->kstack = 0;
+        np->state = UNUSED;
+        return -1;
+    }
+    np->sz = curproc->sz;
+    np->parent = curproc;
+    *np->tf = *curproc->tf;
 
-	// Clear %eax so that fork returns 0 in the child.
-	np->tf->eax = 0;
+    // Clear %eax so that fork returns 0 in the child.
+    np->tf->eax = 0;
 
-	for(i = 0; i < NOFILE; i++)
-		if(curproc->ofile[i])
-			np->ofile[i] = filedup(curproc->ofile[i]);
-	np->cwd = idup(curproc->cwd);
+    for(i = 0; i < NOFILE; i++)
+        if(curproc->ofile[i])
+            np->ofile[i] = filedup(curproc->ofile[i]);
+    np->cwd = idup(curproc->cwd);
 
-	safestrcpy(np->name, curproc->name, sizeof(curproc->name));
+    safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
-	pid = np->pid;
+    pid = np->pid;
 
-	acquire(&ptable.lock);
+    acquire(&ptable.lock);
 
-	np->state = RUNNABLE;
+    np->state = RUNNABLE;
 
 	release(&ptable.lock);
 
@@ -463,11 +460,11 @@ void update_table()
     struct proc *p;
     for(p = ptable.proc; p < &ptable.proc[NPROC] ; p++)
     {
-        if(p->state == RUNNING)
+        if(p->pid > 1 && p!=0 && p->state == RUNNING)
         {
             p->rtime++;
         }
-        else if(p->state == SLEEPING)
+        else if(p->pid > 1 && p!= 0 && p->state == SLEEPING)
         {
             p->iotime++;
         }
@@ -505,7 +502,7 @@ void update_table()
         {
             p->rtime++;
             // choose the next higher priority process
-            for(p = ptable.proc; p < ptable.proc[NPROC]; p++)
+            for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
             {
                 if(minP == 0 || p->priority < minP->priority)
                 {
@@ -561,7 +558,6 @@ scheduler(void)
         {
             if(p->state != RUNNABLE)
                 continue;
-            if(p != 0)
             {
                 // Switch to chosen process.  It is the process's job
                 // to release ptable.lock and then reacquire it
@@ -629,6 +625,7 @@ scheduler(void)
 				// Process is done running for now.
 				// It should have changed its p->state before coming back.
 				c->proc = 0;
+                p->clicks++; 
 			}
         }
 #endif
@@ -641,19 +638,20 @@ scheduler(void)
                 continue;
             }
             struct proc *p1 = 0;
+            highP = p;
             for(p1 = ptable.proc; p1 < &ptable.proc[NPROC]; p1++)
             {
-                if(   highP == 0 || ( (p1->state == RUNNABLE) && highP -> priority > p1->priority ) )    
+                if( ( (p1->state == RUNNABLE) && highP -> priority > p1->priority ) )    
                 {
                     highP = p1;
                 }    
             }
             p = highP;
-            if(p != 0)
             {
                 // Switch to chosen process.  It is the process's job
 				// to release ptable.lock and then reacquire it
 				// before jumping back to us.
+                p->clicks++; 
 				c->proc = p;
 				switchuvm(p);
 				p->state = RUNNING;
@@ -666,7 +664,6 @@ scheduler(void)
 				// Process is done running for now.
 				// It should have changed its p->state before coming back.
 				c->proc = 0;
-            
             }
         }
 #endif
@@ -677,7 +674,20 @@ scheduler(void)
 		{
 			if(p->state != RUNNABLE)
 				continue;
+            struct proc *p1 = 0;
+            minP = p;
+            for(p1 = ptable.proc; p1 < &ptable.proc[NPROC]; p1++) {
+                if(p1->state != RUNNABLE) 
+                {
+                    continue;
+                }
+                if(minP->ctime > p1->ctime) {
+                    minP = p1; 
+                }
+            }   
+            p = minP;
 
+            /*
             if(p->pid > 1)
 			{
 				if(minP!=0)
@@ -700,13 +710,14 @@ scheduler(void)
 			{
 				p = minP;
 			}
-
+            */
 			//	!	REMAINING CODE ////////////////////////////////////////////////////////////////////
 			if(p != 0)
 			{
 				// Switch to chosen process.  It is the process's job
 				// to release ptable.lock and then reacquire it
 				// before jumping back to us.
+                p->clicks++;
 				c->proc = p;
 				switchuvm(p);
 				p->state = RUNNING;
@@ -905,38 +916,47 @@ procdump(void)
 }
 
 	int
-getpinfo(struct pstat *st,int pid)
+getpinfo(struct pstat *st)
 {
-    /*
-	struct proc *p;
-	acquire(&ptable.lock);
-	struct pstat *ip;
-	ip = ptable.pstat_var;
-	int flag = 0;
-	int g = 0;
-	for(p=ptable.proc;p< &ptable.proc[NPROC];p++)
-	{
-		if(p->state == UNUSED || g != pid )
-		{
-			ip++;
-			g++;
-			continue;
-		}
-		cprintf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",pid,ip->pid,ip->runtime,ip->current_queue,ip->ticks[0],ip->ticks[1],ip->ticks[2],ip->ticks[3],ip->ticks[4]);
-		flag = 1;
-		st->pid = ip->pid;
-		st->runtime = ticks-p->ctime;
-		st->num_run = p->clicks;
-		for(int h=0;h<5;h++)
-		{
-			st->ticks[h] = ip->ticks[h];
-		}
-		ip++;
-		g++;
-	}
-	release(&ptable.lock);
-	if(!flag) return -1;
-	
-    */
+    for(int g=0;g<NPROC;g++)
+    {
+        st->pid[g] = pstat_var.pid[g];
+        st->inuse[g] = pstat_var.inuse[g];
+        st->priority[g] = pstat_var.priority[g];
+        st->runtime[g] = pstat_var.runtime[g];
+        st->num_run[g] = pstat_var.num_run[g];
+        st->queue_num[g] = pstat_var.queue_num[g];
+        for(int b=0;b<5;b++)
+        {
+            st->ticks[g][b] = pstat_var.ticks[g][b];
+        }
+        cprintf("Anna %d-> %d\n",g,st->pid[g]);
+    }
+    return 0;
+}
+
+int set_priority(int priority,int pid)
+{
+    struct proc *p = 0;
+    if(pid == 0)
+    {
+        pid = myproc()->pid;
+    }
+    acquire(&ptable.lock);
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+    {
+        if(p->pid == pid)
+        {
+            release(&ptable.lock);
+            int old = p->priority;
+            p->priority = priority;
+            if( p ->priority < old)
+            {
+                yield();
+            }
+            return old;
+        }
+    }
+    release(&ptable.lock);
     return 0;
 }

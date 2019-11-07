@@ -62,6 +62,7 @@ struct proc {
 	char name[16];               // Process name (debugging)
 
 
+    int last_run;                // Last run time of the process
 	int priority;			// Process priority
 	int ctime;			// Start time
 	int etime;			// End time

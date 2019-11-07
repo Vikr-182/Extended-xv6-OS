@@ -113,18 +113,12 @@ sys_getpinfo(void)
 {
 	//struct pstat *g = 0;
 	struct pstat *st ;
-	int num;
-	if(argptr(0,(char **)&st,sizeof(struct pstat ))<0)
+	if(argptr(0,(char **)&st,sizeof(int ))<0)
 	{
 		cprintf("Yr kya hya\n");
 		return -1;
 	}
-	if(argint(1,&num)<0)
-	{
-		cprintf("La La\n");
-		return -1;
-	}
-	int a = getpinfo(st,num);
+	int a = getpinfo(st);
 	a++;
 	return 0;
 }
@@ -141,4 +135,15 @@ int sys_waitx(void)
         return -1;
 
     return waitx(wtime, rtime);
+}
+
+int sys_set_priority(void)
+{
+    int pr;
+    if(argint(0, &pr) < 0)
+        return -1; 
+    int pi;
+    if(argint(1, &pi) < 0)
+        return -1; 
+    return set_priority(pr,pi);
 }
