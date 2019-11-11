@@ -110,8 +110,7 @@ found:
         mlfq[++cnt[0]][0] = p;
         reverse[p->pid] = cnt[0];
     }
-    cprintf("%dna\n",cnt[0]);
-	p->priority = 10;		// Inital random value
+	p->priority = 60;		// Inital random value
 	p->ctime = ticks;		// Creation time
 	p->rtime = 0;			// Total time
 	p->etime = 0;			// End time is 0
@@ -930,7 +929,16 @@ getpinfo(struct pstat *st)
         {
             st->ticks[g][b] = pstat_var.ticks[g][b];
         }
-        cprintf("Anna %d-> %d\n",g,st->pid[g]);
+        int i = g;
+        if(st->pid[i] != -1)
+        {   
+            cprintf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t",i,st->pid[i],st->inuse[i],st->priority[i],st->runtime[i],st->num_run[i],st->queue_num[i]);
+            for(int b=0;b<5;b++)
+            {
+                cprintf("%d\t",st->ticks[i][b]);
+            }
+            cprintf("\n");
+        }  
     }
     return 0;
 }
