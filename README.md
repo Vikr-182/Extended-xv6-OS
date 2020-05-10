@@ -16,6 +16,6 @@ $: cd xv6-public
 
 Now run make to run xv6 - 
 ```
-make qemu[-nox] [SCHEDFLAG={PBS,FCFS,MLFQ}]
+$: make qemu[-nox] [SCHEDFLAG={PBS,FCFS,MLFQ}]
 ```
 
