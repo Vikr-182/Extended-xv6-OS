@@ -7,11 +7,15 @@ xv6 is an open-source operating system implemented by the MIT for multiprocessor
 ## Usage Instructions
 To use this clone the original repo - 
 
-- `git clone https://github.com/Vikr-182/xv6-private`
-- `git clone https://github.com/mit-pdos/xv6-public`
-- `cp xv6-private/* xv6-public`
-- `cd xv6-public`
+``` 
+$: git clone https://github.com/Vikr-182/xv6-private
+$: git clone https://github.com/mit-pdos/xv6-public
+$: cp xv6-private/* xv6-public
+$: cd xv6-public
+```
 
 Now run make to run xv6 - 
--	`make qemu[-nox] [SCHEDFLAG={PBS,FCFS,MLFQ}]`
+```
+make qemu[-nox] [SCHEDFLAG={PBS,FCFS,MLFQ}]
+```
 
